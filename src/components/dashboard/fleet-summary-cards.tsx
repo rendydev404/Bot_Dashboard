@@ -19,6 +19,8 @@ interface FleetSummaryCardsProps {
   activeAccounts: number;
   totalFollowers?: number | null;
   deltas?: { views: Delta; posts: Delta; er: number; followers?: number | null } | null;
+  /** Komposisi kategori (semua akun) atau kategori akun terpilih */
+  accountsHint?: string;
   loading?: boolean;
 }
 
@@ -44,13 +46,18 @@ export function FleetSummaryCards({
   activeAccounts,
   totalFollowers,
   deltas,
+  accountsHint,
   loading = false,
 }: FleetSummaryCardsProps) {
   const cards: Card[] = [
     {
-      title: isAll ? "Akun cabang" : "Akun dipilih",
+      title: isAll ? "Akun terhubung" : "Akun dipilih",
       value: isAll ? String(activeAccounts) : `@${accountName}`,
-      hint: isAll ? "Semua cabang terhubung" : displayName,
+      hint: isAll
+        ? accountsHint || "Semua akun terhubung"
+        : accountsHint
+          ? `${accountsHint} · ${displayName}`
+          : displayName,
       icon: Users,
       tone: "bg-subtle text-muted",
     },

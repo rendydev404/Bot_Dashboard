@@ -7,6 +7,7 @@ export async function GET(request: NextRequest) {
   try {
     const data = await buildOverview({
       account: sp.get("account") || "all",
+      category: sp.get("category"),
       period: sp.get("period"),
       from: sp.get("from"),
       to: sp.get("to"),

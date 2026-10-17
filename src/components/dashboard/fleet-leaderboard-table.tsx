@@ -11,6 +11,8 @@ export interface LeaderboardAccount {
   username: string;
   displayName: string;
   avatarUrl: string | null;
+  /** Kategori akun (workspace), mis. Suka Shawarma, Buzzer, Owner */
+  category?: { slug: string; label: string };
   followers?: number | null;
   followersDelta?: number | null;
   posts: number;
@@ -52,7 +54,8 @@ export function FleetLeaderboardTable({
     return accounts.filter(
       (a) =>
         a.username.toLowerCase().includes(q) ||
-        a.displayName.toLowerCase().includes(q)
+        a.displayName.toLowerCase().includes(q) ||
+        !!a.category?.label.toLowerCase().includes(q)
     );
   }, [accounts, search]);
 
@@ -161,6 +164,11 @@ export function FleetLeaderboardTable({
                           </p>
                           <p className="text-xs text-muted truncate">
                             @{acc.username}
+                            {acc.category && (
+                              <span className="ml-1.5 px-1.5 py-px rounded bg-subtle text-[11px] font-medium">
+                                {acc.category.label}
+                              </span>
+                            )}
                           </p>
                         </div>
                         {isSelected && (

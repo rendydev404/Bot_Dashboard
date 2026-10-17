@@ -10,6 +10,7 @@ export interface AccountItem {
   displayName: string;
   avatarUrl: string | null;
   followers?: number | null;
+  category?: { slug: string; label: string };
   _count?: {
     postStats: number;
     dailyStats?: number;
@@ -22,6 +23,10 @@ interface AccountFilterSelectProps {
   onSelectAccount: (username: string) => void;
   totalAccounts?: number;
   className?: string;
+  /** Bila diisi, muncul pilihan kategori akun di atas daftar */
+  categories?: { slug: string; label: string; accounts: number }[];
+  selectedCategory?: string; // 'all' atau slug kategori
+  onSelectCategory?: (slug: string) => void;
 }
 
 const isMobile = () =>
@@ -51,6 +56,9 @@ export function AccountFilterSelect({
   onSelectAccount,
   totalAccounts = 32,
   className,
+  categories,
+  selectedCategory = "all",
+  onSelectCategory,
 }: AccountFilterSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -60,15 +68,22 @@ export function AccountFilterSelect({
   const current = isAll
     ? null
     : accounts.find((a) => a.username?.toLowerCase() === selectedAccount.toLowerCase());
+  const showCategories = !!categories && categories.length > 1 && !!onSelectCategory;
+  const activeCategory = showCategories
+    ? categories.find((c) => c.slug === selectedCategory) ?? null
+    : null;
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase().trim();
-    if (!q) return accounts;
-    return accounts.filter(
+    const inCat = activeCategory
+      ? accounts.filter((a) => a.category?.slug === activeCategory.slug)
+      : accounts;
+    if (!q) return inCat;
+    return inCat.filter(
       (a) =>
         a.username?.toLowerCase().includes(q) || a.displayName.toLowerCase().includes(q)
     );
-  }, [accounts, query]);
+  }, [accounts, query, activeCategory]);
 
   // Esc menutup; di mobile halaman di belakang sheet dikunci agar tidak ikut scroll
   useEffect(() => {
@@ -120,11 +135,13 @@ export function AccountFilterSelect({
 
         <span className="flex-1 min-w-0 leading-tight">
           <span className="block text-[11px] font-bold uppercase tracking-wide text-accent">
-            {isAll ? "Filter per akun" : "Akun terpilih"}
+            {isAll ? (activeCategory ? "Kategori akun" : "Filter per akun") : "Akun terpilih"}
           </span>
           <span className="block text-sm font-semibold text-fg truncate">
             {isAll
-              ? `Semua akun (${totalAccounts})`
+              ? activeCategory
+                ? `${activeCategory.label} (${activeCategory.accounts})`
+                : `Semua akun (${totalAccounts})`
               : current?.displayName || `@${selectedAccount}`}
           </span>
         </span>
@@ -194,6 +211,32 @@ export function AccountFilterSelect({
                   className="w-full h-11 pl-10 pr-3 rounded-xl bg-subtle border border-transparent text-sm text-fg placeholder-faint outline-none focus:bg-surface focus:border-accent transition-colors"
                 />
               </div>
+
+              {showCategories && (
+                <div role="group" aria-label="Kategori akun" className="mt-2.5 flex flex-wrap gap-1.5">
+                  {[{ slug: "all", label: "Semua kategori", accounts: totalAccounts }, ...categories].map(
+                    (c) => {
+                      const on = (activeCategory?.slug ?? "all") === c.slug;
+                      return (
+                        <button
+                          key={c.slug}
+                          type="button"
+                          aria-pressed={on}
+                          onClick={() => onSelectCategory(c.slug)}
+                          className={cn(
+                            "h-8 px-3 rounded-full text-xs font-semibold border transition-colors cursor-pointer",
+                            on
+                              ? "bg-accent text-on-accent border-accent"
+                              : "bg-surface text-fg border-line hover:border-accent"
+                          )}
+                        >
+                          {c.label} <span className={on ? "opacity-80" : "text-muted"}>{c.accounts}</span>
+                        </button>
+                      );
+                    }
+                  )}
+                </div>
+              )}
             </div>
 
             <ul
@@ -216,10 +259,14 @@ export function AccountFilterSelect({
                     </span>
                     <span className="flex-1 min-w-0 leading-tight">
                       <span className="block text-sm font-semibold text-fg">
-                        Semua akun ({totalAccounts})
+                        {activeCategory
+                          ? `Semua akun ${activeCategory.label} (${activeCategory.accounts})`
+                          : `Semua akun (${totalAccounts})`}
                       </span>
                       <span className="block text-xs text-muted">
-                        Gabungan performa seluruh jaringan
+                        {activeCategory
+                          ? "Gabungan performa kategori ini"
+                          : "Gabungan performa seluruh jaringan"}
                       </span>
                     </span>
                     {isAll && <Check className="w-5 h-5 text-accent shrink-0" />}
@@ -248,6 +295,7 @@ export function AccountFilterSelect({
                         </span>
                         <span className="block text-xs text-muted truncate">
                           @{acc.username}
+                          {showCategories && !activeCategory && acc.category && ` · ${acc.category.label}`}
                         </span>
                       </span>
                       <span hidden={!acc._count && (acc.followers === null || acc.followers === undefined)} className="text-xs font-medium text-muted bg-subtle rounded-full px-2 py-0.5 shrink-0">

@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AccountFilterSelect } from "@/components/dashboard/account-filter-select";
 import { FleetSummaryCards } from "@/components/dashboard/fleet-summary-cards";
+import { AccountCategoryCards, type AccountCategorySummary } from "@/components/dashboard/account-category-cards";
 import { FleetLeaderboardTable } from "@/components/dashboard/fleet-leaderboard-table";
 import { TopPerformingPostCard } from "@/components/dashboard/top-performing-post-card";
 import { AiInsightPanel, type AiInsightPanelHandle } from "@/components/dashboard/ai-insight-panel";
@@ -23,17 +24,19 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState("all");
+  const [selectedCategory, setSelectedCategory] = useState("all");
   const [period, setPeriod] = useState<PeriodValue>({ key: "7d" });
   const insightRef = useRef<AiInsightPanelHandle>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchOverviewData = useCallback(
-    async (accountName: string, p: PeriodValue) => {
+    async (accountName: string, category: string, p: PeriodValue) => {
       abortRef.current?.abort();
       const ctrl = new AbortController();
       abortRef.current = ctrl;
 
       const qs = new URLSearchParams({ account: accountName, period: p.key });
+      if (category !== "all") qs.set("category", category);
       if (p.key === "custom" && p.from && p.to) {
         qs.set("from", p.from);
         qs.set("to", p.to);
@@ -56,17 +59,25 @@ export default function DashboardPage() {
   );
 
   useEffect(() => {
-    fetchOverviewData(selectedAccount, period);
+    fetchOverviewData(selectedAccount, selectedCategory, period);
     return () => abortRef.current?.abort();
-  }, [selectedAccount, period, fetchOverviewData]);
+  }, [selectedAccount, selectedCategory, period, fetchOverviewData]);
 
   const handleRefresh = () => {
     setRefreshing(true);
-    fetchOverviewData(selectedAccount, period);
+    fetchOverviewData(selectedAccount, selectedCategory, period);
   };
 
   const handleSelectAccount = (acc: string) => {
     setSelectedAccount(acc);
+    setLoading(true);
+  };
+
+  // Pilih kategori = tampilan gabungan kategori itu (pilihan akun dilepas)
+  const handleSelectCategory = (slug: string) => {
+    if (slug === selectedCategory && selectedAccount === "all") return;
+    setSelectedCategory(slug);
+    setSelectedAccount("all");
     setLoading(true);
   };
 
@@ -89,6 +100,14 @@ export default function DashboardPage() {
     | { label: string; from: string; to: string; days: number; hasPrev: boolean }
     | undefined;
   const initialLoad = loading && !data;
+  const categories: AccountCategorySummary[] = data?.categories ?? [];
+  const activeCategory: AccountCategorySummary | null =
+    (data?.category && categories.find((c) => c.slug === data.category.slug)) || null;
+  const categoryHint = activeCategory
+    ? `Kategori ${activeCategory.label}`
+    : categories.length
+      ? categories.map((c) => `${c.accounts} ${c.label}`).join(" · ")
+      : undefined;
   const chartTitle = info
     ? info.days === 1
       ? "Aktivitas kemarin"
@@ -102,9 +121,15 @@ export default function DashboardPage() {
         <div>
           <h2 className="text-2xl font-bold text-fg">Performa Threads</h2>
           <p className="text-sm text-muted mt-1">
-            {isAll
-              ? `Gabungan dari ${accountCount} akun cabang Suka Shawarma.`
-              : `Menampilkan satu akun: @${currentAccount.username}.`}
+            {isAll && activeCategory
+              ? `Gabungan dari ${activeCategory.accounts} akun kategori ${activeCategory.label}.`
+              : isAll
+              ? categories.length > 1
+                ? `Gabungan dari ${accountCount} akun: ${categories.map((c) => c.label).join(", ")}.`
+                : `Gabungan dari ${accountCount} akun cabang Suka Shawarma.`
+              : `Menampilkan satu akun: @${currentAccount.username}${
+                  currentAccount.category ? ` (${currentAccount.category.label})` : ""
+                }.`}
           </p>
         </div>
 
@@ -113,7 +138,10 @@ export default function DashboardPage() {
             accounts={accounts}
             selectedAccount={selectedAccount}
             onSelectAccount={handleSelectAccount}
-            totalAccounts={accountCount}
+            totalAccounts={accounts.length || accountCount}
+            categories={categories}
+            selectedCategory={selectedCategory}
+            onSelectCategory={handleSelectCategory}
           />
 
           <button
@@ -168,6 +196,15 @@ export default function DashboardPage() {
         activeAccounts={stats.activeAccounts ?? accountCount}
         totalFollowers={stats.totalFollowers ?? currentAccount.followers ?? null}
         deltas={data?.deltas}
+        accountsHint={isAll ? categoryHint : currentAccount.category?.label}
+      />
+
+      {/* Ringkasan per kategori akun */}
+      <AccountCategoryCards
+        loading={initialLoad}
+        categories={categories}
+        activeSlug={isAll ? activeCategory?.slug ?? null : currentAccount.category?.slug}
+        onSelect={handleSelectCategory}
       />
 
       {/* Grafik + postingan terpopuler */}
@@ -205,10 +242,15 @@ export default function DashboardPage() {
             <AiInsightPanel
               ref={insightRef}
               account={selectedAccount}
+              category={selectedCategory}
               period={period}
               periodLabel={info?.label.toLowerCase()}
               scopeLabel={
-                isAll ? `Semua akun (${accountCount})` : `@${currentAccount.username}`
+                !isAll
+                  ? `@${currentAccount.username}`
+                  : activeCategory
+                    ? `Kategori ${activeCategory.label} (${activeCategory.accounts})`
+                    : `Semua akun (${accountCount})`
               }
             />
           </div>

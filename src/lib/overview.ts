@@ -8,12 +8,22 @@ const WIB_MS = 7 * 3_600_000;
 const DAY_NAMES = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
 
+/** Kategori akun = workspace bot (mis. Suka Shawarma, Buzzer, Owner). */
+export interface AccountCategory {
+  slug: string;
+  label: string;
+}
+
+const UNCATEGORIZED: AccountCategory = { slug: "lainnya", label: "Lainnya" };
+
 function erOf(views: number, interactions: number, digits = 1) {
   return views > 0 ? Number(((interactions / views) * 100).toFixed(digits)) : 0;
 }
 
 export interface OverviewParams {
   account: string;
+  /** Slug kategori akun (workspace); berlaku bila account = "all" */
+  category?: string | null;
   period: string | null;
   from: string | null;
   to: string | null;
@@ -42,18 +52,20 @@ export async function buildOverview(opts: OverviewParams) {
           avatarUrl: string | null;
           threadsUserId: string;
           insightsSyncedAt: string | null;
+          Workspace: { slug: string; nama: string } | null;
         }[]
       >(
         db()
           .from("ThreadsAccount")
-          .select("id, username, displayName, avatarUrl, threadsUserId, insightsSyncedAt")
+          .select("id, username, displayName, avatarUrl, threadsUserId, insightsSyncedAt, Workspace(slug, nama)")
           .order("createdAt", { ascending: true })
       ).then(withoutExcluded),
       agg.postsByAccount(),
     ]);
     const postCountOf = new Map(allPostCounts.map((c) => [c.threadsAccountId, c.posts]));
-    const rawAccounts = accountRows.map((a) => ({
+    const rawAccounts = accountRows.map(({ Workspace, ...a }) => ({
       ...a,
+      category: Workspace ? { slug: Workspace.slug, label: Workspace.nama } : UNCATEGORIZED,
       insightsSyncedAt: toDateOrNull(a.insightsSyncedAt),
       _count: { postStats: postCountOf.get(a.id) ?? 0 },
     }));
@@ -71,7 +83,17 @@ export async function buildOverview(opts: OverviewParams) {
             a.id === accountFilter
         );
 
-    const ids = targetAccount ? [targetAccount.id] : undefined;
+    // Filter kategori hanya berlaku untuk tampilan gabungan; slug tak dikenal diabaikan
+    const catSlug = isAll && opts.category && opts.category !== "all" ? opts.category : null;
+    const catAccounts = catSlug ? accounts.filter((a) => a.category.slug === catSlug) : [];
+    const activeCategory = catAccounts[0]?.category ?? null;
+    const scopeAccounts = activeCategory ? catAccounts : accounts;
+
+    const ids = targetAccount
+      ? [targetAccount.id]
+      : activeCategory
+        ? catAccounts.map((a) => a.id)
+        : undefined;
     const curPostRange = inRange(from, to);
     const prevPostRange = inRange(prevFrom, prevTo);
 
@@ -83,6 +105,7 @@ export async function buildOverview(opts: OverviewParams) {
       .gte("postedAt", sqlTs(curPostRange.gte))
       .lt("postedAt", sqlTs(curPostRange.lt));
     if (targetAccount) topPostQuery = topPostQuery.eq("threadsAccountId", targetAccount.id);
+    else if (ids) topPostQuery = topPostQuery.in("threadsAccountId", ids);
     else {
       const hidden = await excludedIdList();
       if (hidden) topPostQuery = topPostQuery.not("threadsAccountId", "in", hidden);
@@ -196,13 +219,19 @@ export async function buildOverview(opts: OverviewParams) {
     let totalFollowers: number | null = null;
     let prevTotalFollowers: number | null = null;
 
+    const sumFollowers = (m: Map<string, number>) => {
+      if (!activeCategory) return m.size > 0 ? Array.from(m.values()).reduce((a, b) => a + b, 0) : null;
+      let sum: number | null = null;
+      for (const a of catAccounts) {
+        const f = m.get(a.id);
+        if (f !== undefined) sum = (sum ?? 0) + f;
+      }
+      return sum;
+    };
+
     if (isAll) {
-      if (curFollowerMap.size > 0) {
-        totalFollowers = Array.from(curFollowerMap.values()).reduce((a, b) => a + b, 0);
-      }
-      if (prevFollowerMap.size > 0) {
-        prevTotalFollowers = Array.from(prevFollowerMap.values()).reduce((a, b) => a + b, 0);
-      }
+      totalFollowers = sumFollowers(curFollowerMap);
+      prevTotalFollowers = sumFollowers(prevFollowerMap);
     } else if (targetAccount) {
       totalFollowers = curFollowerMap.get(targetAccount.id) ?? null;
       prevTotalFollowers = prevFollowerMap.get(targetAccount.id) ?? null;
@@ -278,6 +307,7 @@ export async function buildOverview(opts: OverviewParams) {
           username: targetAccount.username,
           displayName: targetAccount.displayName,
           avatarUrl: targetAccount.avatarUrl,
+          category: targetAccount.category,
           threadsUserId: targetAccount.threadsUserId,
           insightsSyncedAt: targetAccount.insightsSyncedAt?.toISOString() || null,
           totalPosts: targetAccount._count?.postStats || 0,
@@ -287,12 +317,15 @@ export async function buildOverview(opts: OverviewParams) {
       : {
           isAll: true,
           username: "all",
-          displayName: `Semua Akun (${accounts.length} Terhubung)`,
+          displayName: activeCategory
+            ? `${activeCategory.label} (${catAccounts.length} akun)`
+            : `Semua Akun (${accounts.length} Terhubung)`,
+          category: activeCategory,
           avatarUrl: null,
           threadsUserId: null,
           insightsSyncedAt: accounts[0]?.insightsSyncedAt?.toISOString() || null,
           totalPosts: postsCur,
-          totalAccounts: accounts.length,
+          totalAccounts: scopeAccounts.length,
           followers: totalFollowers,
           followersDelta,
         };
@@ -302,7 +335,7 @@ export async function buildOverview(opts: OverviewParams) {
     const prevMap = new Map(lbPrev.map((g) => [g.threadsAccountId, g._sum.views || 0]));
     const postMap = new Map(lbPosts.map((g) => [g.threadsAccountId, g._count._all]));
 
-    const leaderboard = accounts
+    const ranked = accounts
       .map((a) => {
         const d = curMap.get(a.id);
         const views = d?.views || 0;
@@ -316,6 +349,7 @@ export async function buildOverview(opts: OverviewParams) {
           username: a.username || "outlet",
           displayName: a.displayName || a.username || "Cabang",
           avatarUrl: a.avatarUrl,
+          category: a.category,
           posts: postMap.get(a.id) || 0,
           followers: fol,
           followersDelta: fol !== null && pFol !== null ? fol - pFol : null,
@@ -329,6 +363,39 @@ export async function buildOverview(opts: OverviewParams) {
       })
       .sort((a, b) => b.views - a.views);
 
+    // ---- Ringkasan per kategori akun (dari peringkat, tanpa query tambahan)
+    const catMap = new Map<
+      string,
+      AccountCategory & { accounts: number; followers: number | null; posts: number; views: number; interactions: number }
+    >();
+    for (const r of ranked) {
+      const c = catMap.get(r.category.slug) ?? {
+        ...r.category,
+        accounts: 0,
+        followers: null,
+        posts: 0,
+        views: 0,
+        interactions: 0,
+      };
+      c.accounts += 1;
+      if (r.followers !== null) c.followers = (c.followers ?? 0) + r.followers;
+      c.posts += r.posts;
+      c.views += r.views;
+      c.interactions += r.likes + r.replies + r.reposts;
+      catMap.set(c.slug, c);
+    }
+    const allViews = ranked.reduce((s, r) => s + r.views, 0);
+    const categories = [...catMap.values()]
+      .map((c) => ({
+        ...c,
+        er: erOf(c.views, c.interactions),
+        viewShare: allViews > 0 ? Math.round((c.views / allViews) * 100) : 0,
+      }))
+      .sort((a, b) => b.accounts - a.accounts || b.views - a.views);
+    const leaderboard = activeCategory
+      ? ranked.filter((r) => r.category.slug === activeCategory.slug)
+      : ranked;
+
     return {
       success: true as const,
       period: {
@@ -340,6 +407,7 @@ export async function buildOverview(opts: OverviewParams) {
         hasPrev,
       },
       currentAccount,
+      category: activeCategory,
       stats: {
         totalViews: cur.views,
         totalLikes: cur.likes,
@@ -347,7 +415,7 @@ export async function buildOverview(opts: OverviewParams) {
         totalReposts: cur.reposts,
         totalInteractions,
         avgER,
-        activeAccounts: accounts.length,
+        activeAccounts: scopeAccounts.length,
         totalPosts: postsCur,
         totalFollowers,
         followersDelta,
@@ -358,6 +426,7 @@ export async function buildOverview(opts: OverviewParams) {
         followers: curFollowerMap.get(a.id) ?? null,
       })),
       leaderboard,
+      categories,
       topPost,
       activity,
       contentFormats,

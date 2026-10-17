@@ -17,6 +17,7 @@ export async function POST(request: NextRequest) {
     const insight = await getInsight(
       {
         account: str(body.account, 100) || "all",
+        category: str(body.category, 100),
         period: str(body.period, 20),
         from: str(body.from, 10),
         to: str(body.to, 10),

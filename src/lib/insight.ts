@@ -35,9 +35,10 @@ function dtext(d: Delta | undefined, unit = "%"): string {
 }
 
 function scopeOf(o: Overview): string {
-  return o.currentAccount.isAll
-    ? `Semua akun (${o.stats.activeAccounts})`
-    : `@${o.currentAccount.username}`;
+  if (!o.currentAccount.isAll) return `@${o.currentAccount.username}`;
+  return o.category
+    ? `Kategori ${o.category.label} (${o.stats.activeAccounts} akun)`
+    : `Semua akun (${o.stats.activeAccounts})`;
 }
 
 function periodContext(o: Overview): string {
@@ -59,6 +60,10 @@ function periodContext(o: Overview): string {
         `${i + 1}. @${a.username}: ${fmt(a.views)} views${dtext(a.delta)}, ${a.followers !== null && a.followers !== undefined ? `${fmt(a.followers)} followers, ` : ""}ER ${a.er}%, ${a.posts} post`
     )
     .join("\n");
+
+  const categories = o.categories
+    .map((c) => `${c.label}: ${c.accounts} akun, ${fmt(c.views)} views (${c.viewShare}%), ER ${c.er}%, ${c.posts} post`)
+    .join("; ");
 
   const formats = o.contentFormats
     .map((f) => `${f.name}: ${f.count} post (${f.value}%)`)
@@ -87,6 +92,7 @@ ${trend}
 PERINGKAT AKUN PADA PERIODE INI (top 8):
 ${ranking}
 
+KATEGORI AKUN SELURUH JARINGAN: ${categories || "-"}
 KOMPOSISI FORMAT POSTINGAN YANG TERBIT: ${formats}
 POSTINGAN TERBAIK PERIODE INI: ${topPost}`;
 }
@@ -141,7 +147,7 @@ export async function getInsight(
   params: OverviewParams,
   force = false
 ): Promise<InsightResult> {
-  const key = JSON.stringify([params.account, params.period, params.from, params.to]);
+  const key = JSON.stringify([params.account, params.category ?? "all", params.period, params.from, params.to]);
   const hit = cache.get(key);
   if (!force && hit && Date.now() - hit.at < TTL_MS) return hit.value;
 

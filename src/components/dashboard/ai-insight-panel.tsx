@@ -34,6 +34,8 @@ export interface AiInsightPanelHandle {
 
 interface AiInsightPanelProps {
   account: string;
+  /** Slug kategori akun ('all' = tanpa filter) */
+  category?: string;
   period: PeriodValue;
   /** Teks pendek untuk label, mis. "7 hari terakhir" */
   periodLabel?: string;
@@ -48,7 +50,7 @@ const timeLabel = (iso: string) =>
   }).format(new Date(iso));
 
 export const AiInsightPanel = forwardRef<AiInsightPanelHandle, AiInsightPanelProps>(
-  function AiInsightPanel({ account, period, periodLabel, scopeLabel }, ref) {
+  function AiInsightPanel({ account, category = "all", period, periodLabel, scopeLabel }, ref) {
     const rootRef = useRef<HTMLDivElement>(null);
     const abortRef = useRef<AbortController | null>(null);
     const [entry, setEntry] = useState<{ key: string; insight: Insight } | null>(null);
@@ -57,7 +59,7 @@ export const AiInsightPanel = forwardRef<AiInsightPanelHandle, AiInsightPanelPro
     const [copied, setCopied] = useState(false);
 
     // Hasil hanya ditampilkan bila masih cocok dengan filter yang aktif
-    const key = JSON.stringify([account, period.key, period.from ?? "", period.to ?? ""]);
+    const key = JSON.stringify([account, category, period.key, period.from ?? "", period.to ?? ""]);
     const current = entry && entry.key === key ? entry.insight : null;
     const stale = entry && entry.key !== key;
     const label = periodLabel ?? "periode ini";
@@ -75,6 +77,7 @@ export const AiInsightPanel = forwardRef<AiInsightPanelHandle, AiInsightPanelPro
           signal: ctrl.signal,
           body: JSON.stringify({
             account,
+            category: category === "all" ? undefined : category,
             period: period.key,
             from: period.from,
             to: period.to,
